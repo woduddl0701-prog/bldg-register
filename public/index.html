@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>건축물대장 바로보기</title>
+<meta name="description" content="주소만 입력하면 국토교통부 건축HUB 건축물대장 정보를 바로 열람합니다.">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1a1d23; --muted: #6b7280;
+    --line: #e5e7eb; --accent: #2457d6; --accent-weak: #e8eefc; --danger: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111317; --card:#1a1d23; --text:#e8eaed; --muted:#9aa0a6;
+            --line:#2c3038; --accent:#6b93ff; --accent-weak:#1f2a44; --danger:#ff7b6b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font-family: -apple-system, "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 8px 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+  form { display:flex; gap:8px; }
+  input[type=search] { flex:1; padding:12px 14px; font-size:16px; border:1px solid var(--line);
+         border-radius:10px; background:var(--card); color:var(--text); }
+  button { padding:12px 18px; border:0; border-radius:10px; background:var(--accent); color:#fff;
+           font-size:15px; cursor:pointer; white-space:nowrap; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line); padding:8px 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
+  .addr-item { padding:12px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .addr-item:last-child { border-bottom:0; }
+  .addr-item:hover { background:var(--accent-weak); }
+  .addr-item .road { font-weight:600; }
+  .addr-item .jibun { color:var(--muted); font-size:13px; margin-top:2px; }
+  .tag { display:inline-block; font-size:11px; padding:2px 6px; border-radius:6px;
+         background:var(--accent-weak); color:var(--accent); margin-left:6px; vertical-align:middle; }
+  .tabs { display:flex; gap:4px; flex-wrap:wrap; border-bottom:1px solid var(--line); margin:16px 0 0; }
+  .tab { padding:10px 14px; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; font-size:14px; }
+  .tab.active { color:var(--accent); border-color:var(--accent); font-weight:600; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:10px 16px; }
+  .kv .k { font-size:12px; color:var(--muted); }
+  .kv .v { font-size:15px; margin-top:2px; word-break:keep-all; }
+  .bld-head { font-size:17px; font-weight:700; margin-bottom:12px; }
+  .table-wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  tr.click { cursor:pointer; } tr.click:hover { background:var(--accent-weak); }
+  .muted { color:var(--muted); font-size:14px; }
+  .err { color:var(--danger); }
+  .pager { display:flex; gap:8px; justify-content:center; margin-top:12px; }
+  .note { font-size:12px; color:var(--muted); margin-top:28px; line-height:1.6; }
+  .note a { color:var(--accent); }
+  @media (max-width: 520px) { button { padding:12px 14px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>건축물대장 바로보기</h1>
+  <div class="sub">도로명 또는 지번 주소로 건물을 찾으세요. (예: 세종대로 110, 역삼동 737)</div>
+
+  <button id="openPostcode" style="width:100%">🔍 주소 검색</button>
+  <div id="postcodeWrap" class="card" style="display:none;padding:0;height:470px;overflow:hidden"></div>
+
+  <div id="addrBox"></div>
+  <div id="resultBox"></div>
+
+  <div class="note">
+    본 서비스는 국토교통부 건축HUB 건축물대장정보 Open API 데이터를 보여주는 참고용 화면이며,
+    법적 효력이 있는 건축물대장 열람·발급은
+    <a href="https://www.gov.kr" target="_blank" rel="noopener">정부24</a> 또는
+    <a href="https://www.eais.go.kr" target="_blank" rel="noopener">세움터</a>를 이용하세요.
+  </div>
+</div>
+
+<script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+// ---------- 포맷터 ----------
+const num = (v, unit = "") => {
+  if (v === "" || v == null) return "-";
+  const n = Number(v);
+  if (isNaN(n)) return esc(v);
+  return n.toLocaleString("ko-KR", { maximumFractionDigits: 2 }) + unit;
+};
+const ymd = (v) => {
+  const s = String(v ?? "").trim();
+  return /^\d{8}$/.test(s) ? `${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)}` : (s ? esc(s) : "-");
+};
+const txt = (v) => (v === "" || v == null || String(v).trim() === "") ? "-" : esc(String(v).trim());
+const sum = (...vs) => vs.reduce((a, v) => a + (Number(v) || 0), 0);
+
+// ---------- API ----------
+async function api(path, params) {
+  const r = await fetch(`${path}?${new URLSearchParams(params)}`);
+  const data = await r.json().catch(() => ({ error: "응답을 읽을 수 없습니다." }));
+  if (!r.ok) throw new Error(data.error || "요청 실패");
+  return data;
+}
+
+// ---------- 주소 검색 (카카오/다음 우편번호 서비스, 키 불필요) ----------
+// 선택한 주소의 법정동코드(bcode) + 지번주소의 번·지 → 건축물대장 조회 키로 변환
+function toBuildingKey(d) {
+  const jibun = d.jibunAddress || d.autoJibunAddress || "";
+  const m = jibun.match(/(산\s*)?(\d+)(?:-(\d+))?\s*$/);
+  if (!d.bcode || !m) return null;
+  return {
+    roadAddr: d.roadAddress || d.autoRoadAddress || jibun,
+    jibunAddr: jibun,
+    bdNm: d.buildingName,
+    isApt: d.apartment === "Y",
+    sigunguCd: d.bcode.slice(0, 5),
+    bjdongCd: d.bcode.slice(5, 10),
+    platGbCd: m[1] ? "1" : "0",
+    bun: m[2].padStart(4, "0"),
+    ji: (m[3] || "0").padStart(4, "0"),
+  };
+}
+
+function openPostcode() {
+  const wrap = $("#postcodeWrap");
+  wrap.style.display = "block";
+  $("#addrBox").innerHTML = "";
+  $("#resultBox").innerHTML = "";
+  new daum.Postcode({
+    width: "100%",
+    height: "100%",
+    oncomplete(data) {
+      wrap.style.display = "none";
+      const a = toBuildingKey(data);
+      if (!a) {
+        $("#addrBox").innerHTML = `<div class="card err">이 주소는 지번 정보를 확인할 수 없습니다. 지번 주소로 다시 검색해 보세요.</div>`;
+        return;
+      }
+      openBuilding(a);
+    },
+  }).embed(wrap);
+}
+$("#openPostcode").addEventListener("click", openPostcode);
+const searchAddress = openPostcode; // "다른 주소 선택" 버튼용
+
+// ---------- 건축물대장 ----------
+let cur = null;      // 선택한 주소
+const cache = {};    // 탭별 결과 캐시
+
+const TABS = [
+  { id: "title", label: "표제부" },
+  { id: "recap", label: "총괄표제부" },
+  { id: "floor", label: "층별개요" },
+  { id: "expos", label: "전유부(호별)" },
+  { id: "jijigu", label: "지역·지구" },
+];
+
+function openBuilding(a) {
+  cur = a;
+  for (const k in cache) delete cache[k];
+  $("#addrBox").innerHTML = `<div class="card">
+    <div style="font-weight:600">${esc(a.roadAddr)}</div>
+    <div class="muted" style="margin-top:2px">[지번] ${esc(a.jibunAddr)}</div>
+    <div style="margin-top:10px"><button class="ghost" id="backBtn">← 다른 주소 선택</button></div>
+  </div>`;
+  $("#backBtn").addEventListener("click", searchAddress);
+  $("#resultBox").innerHTML = `
+    <div class="tabs">${TABS.map((t) => `<div class="tab" data-t="${t.id}">${t.label}</div>`).join("")}</div>
+    <div id="tabBody"></div>`;
+  document.querySelectorAll(".tab").forEach((el) => el.addEventListener("click", () => showTab(el.dataset.t)));
+  showTab("title");
+}
+
+function keyParams(extra = {}) {
+  const { sigunguCd, bjdongCd, platGbCd, bun, ji } = cur;
+  return { sigunguCd, bjdongCd, platGbCd, bun, ji, ...extra };
+}
+
+async function load(op, extra = {}) {
+  const k = op + JSON.stringify(extra);
+  if (!cache[k]) cache[k] = api("/api/building", keyParams({ op, ...extra }));
+  return cache[k];
+}
+
+async function showTab(id) {
+  document.querySelectorAll(".tab").forEach((el) => el.classList.toggle("active", el.dataset.t === id));
+  const body = $("#tabBody");
+  body.innerHTML = `<div class="card muted">불러오는 중…</div>`;
+  try {
+    const html = await RENDER[id]();
+    body.innerHTML = html;
+    if (id === "expos") bindExpos();
+  } catch (err) {
+    body.innerHTML = `<div class="card err">${esc(err.message)}</div>`;
+  }
+}
+
+const kv = (k, v) => `<div class="kv"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+const empty = (msg) => `<div class="card muted">${msg}</div>`;
+
+const RENDER = {
+  async title() {
+    const d = await load("title");
+    if (!d.items.length) return empty("표제부 정보가 없습니다. (건축물대장이 없는 필지일 수 있습니다)");
+    // 주건축물 먼저
+    const items = [...d.items].sort((a, b) => String(a.mainAtchGbCd).localeCompare(String(b.mainAtchGbCd)));
+    return items.map((b) => `<div class="card">
+      <div class="bld-head">${txt(b.bldNm) !== "-" ? txt(b.bldNm) : "건축물"} ${txt(b.dongNm) !== "-" ? txt(b.dongNm) : ""}
+        <span class="tag">${txt(b.regstrKindCdNm)}</span><span class="tag">${txt(b.mainAtchGbCdNm)}</span></div>
+      <div class="grid">
+        ${kv("주용도", txt(b.mainPurpsCdNm))}
+        ${kv("기타용도", txt(b.etcPurps))}
+        ${kv("구조", txt(b.strctCdNm))}
+        ${kv("지붕", txt(b.roofCdNm))}
+        ${kv("대지면적", num(b.platArea, "㎡"))}
+        ${kv("건축면적", num(b.archArea, "㎡"))}
+        ${kv("연면적", num(b.totArea, "㎡"))}
+        ${kv("용적률산정연면적", num(b.vlRatEstmTotArea, "㎡"))}
+        ${kv("건폐율", num(b.bcRat, "%"))}
+        ${kv("용적률", num(b.vlRat, "%"))}
+        ${kv("높이", num(b.heit, "m"))}
+        ${kv("층수", `지상 ${num(b.grndFlrCnt)} / 지하 ${num(b.ugrndFlrCnt)}`)}
+        ${kv("세대/가구/호", `${num(b.hhldCnt)} / ${num(b.fmlyCnt)} / ${num(b.hoCnt)}`)}
+        ${kv("승강기", `승용 ${num(b.rideUseElvtCnt)} / 비상 ${num(b.emgenUseElvtCnt)}`)}
+        ${kv("주차대수", num(sum(b.indrMechUtcnt, b.oudrMechUtcnt, b.indrAutoUtcnt, b.oudrAutoUtcnt), "대"))}
+        ${kv("허가일", ymd(b.pmsDay))}
+        ${kv("착공일", ymd(b.stcnsDay))}
+        ${kv("사용승인일", ymd(b.useAprDay))}
+        ${kv("내진설계", b.rserthqkDsgnApplyYn === "1" ? "적용" : b.rserthqkDsgnApplyYn === "0" ? "미적용" : "-")}
+        ${kv("에너지효율등급", txt(b.engrGrade))}
+      </div></div>`).join("");
+  },
+
+  async recap() {
+    const d = await load("recap");
+    if (!d.items.length) return empty("총괄표제부가 없습니다. (건물이 1동뿐인 대지는 총괄표제부가 없습니다)");
+    return d.items.map((b) => `<div class="card">
+      <div class="bld-head">${txt(b.bldNm)} <span class="tag">총괄</span></div>
+      <div class="grid">
+        ${kv("주용도", txt(b.mainPurpsCdNm))}
+        ${kv("대지면적", num(b.platArea, "㎡"))}
+        ${kv("건축면적", num(b.archArea, "㎡"))}
+        ${kv("연면적", num(b.totArea, "㎡"))}
+        ${kv("건폐율", num(b.bcRat, "%"))}
+        ${kv("용적률", num(b.vlRat, "%"))}
+        ${kv("주건축물수", num(b.mainBldCnt))}
+        ${kv("부속건축물", `${num(b.atchBldCnt)}동 / ${num(b.atchBldArea, "㎡")}`)}
+        ${kv("세대/가구/호", `${num(b.hhldCnt)} / ${num(b.fmlyCnt)} / ${num(b.hoCnt)}`)}
+        ${kv("총주차대수", num(b.totPkngCnt, "대"))}
+        ${kv("사용승인일", ymd(b.useAprDay))}
+      </div></div>`).join("");
+  },
+
+  async floor() {
+    const d = await load("floor", { numOfRows: "500" });
+    if (!d.items.length) return empty("층별개요 정보가 없습니다.");
+    // 옥탑 → 지상(높은 층부터) → 지하(B1부터) 순
+    const rank = (f) => f.flrGbCd === "30" ? -10000 + (Number(f.flrNo) || 0)
+      : f.flrGbCd === "10" ? 1000 + (Number(f.flrNo) || 0) : -(Number(f.flrNo) || 0);
+    const rows = [...d.items].sort((a, b) =>
+      String(a.dongNm ?? "").localeCompare(String(b.dongNm ?? "")) || rank(a) - rank(b));
+    return `<div class="card table-wrap"><table>
+      <tr><th>동</th><th>층</th><th>구조</th><th>용도</th><th>면적(㎡)</th><th>주/부속</th></tr>
+      ${rows.map((f) => `<tr>
+        <td>${txt(f.dongNm)}</td><td>${txt(f.flrNoNm)}</td><td>${txt(f.strctCdNm)}</td>
+        <td>${txt(f.etcPurps) !== "-" ? txt(f.etcPurps) : txt(f.mainPurpsCdNm)}</td>
+        <td>${num(f.area)}</td><td>${txt(f.mainAtchGbCdNm)}</td></tr>`).join("")}
+    </table></div>`;
+  },
+
+  async expos() {
+    const d = await load("expos", { numOfRows: "1000" });
+    if (!d.items.length) return empty("전유부가 없습니다. (일반건축물은 전유부가 없고, 집합건물(아파트·오피스텔 등)만 해당됩니다)");
+    const more = d.totalCount > d.items.length ? `<div class="muted" style="margin-bottom:8px">총 ${num(d.totalCount)}호 중 ${num(d.items.length)}호 표시</div>` : "";
+    return `<div class="card">
+      ${more}
+      <input type="search" id="hoFilter" placeholder="동·호 필터 (예: 101동 1203)" style="width:100%;margin-bottom:10px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)">
+      <div class="table-wrap"><table id="hoTable">
+        <tr><th>동</th><th>호</th><th>층</th><th></th></tr>
+        ${d.items.map((h) => `<tr class="click" data-dong="${esc(String(h.dongNm ?? "").trim())}" data-ho="${esc(String(h.hoNm ?? "").trim())}">
+          <td>${txt(h.dongNm)}</td><td>${txt(h.hoNm)}</td><td>${txt(h.flrNoNm)}</td><td class="muted">면적 보기 ›</td></tr>`).join("")}
+      </table></div></div>
+      <div id="hoDetail"></div>`;
+  },
+
+  async jijigu() {
+    const d = await load("jijigu");
+    if (!d.items.length) return empty("지역·지구·구역 정보가 없습니다.");
+    return `<div class="card table-wrap"><table>
+      <tr><th>구분</th><th>명칭</th><th>대표</th></tr>
+      ${d.items.map((j) => `<tr><td>${txt(j.jijiguGbCdNm)}</td>
+        <td>${txt(j.jijiguCdNm) !== "-" ? txt(j.jijiguCdNm) : txt(j.etcJijigu)}</td>
+        <td>${j.reprYn === "1" ? "●" : ""}</td></tr>`).join("")}
+    </table></div>`;
+  },
+};
+
+function bindExpos() {
+  const rows = [...document.querySelectorAll("#hoTable tr.click")];
+  $("#hoFilter").addEventListener("input", (e) => {
+    const terms = e.target.value.replace(/[동호]/g, " ").trim().split(/\s+/).filter(Boolean);
+    rows.forEach((r) => {
+      const hay = `${r.dataset.dong} ${r.dataset.ho}`;
+      r.style.display = terms.every((t) => hay.includes(t)) ? "" : "none";
+    });
+  });
+  rows.forEach((r) => r.addEventListener("click", () => showUnit(r.dataset.dong, r.dataset.ho)));
+}
+
+async function showUnit(dongNm, hoNm) {
+  const box = $("#hoDetail");
+  box.innerHTML = `<div class="card muted">불러오는 중…</div>`;
+  try {
+    const extra = { hoNm };
+    if (dongNm) extra.dongNm = dongNm;
+    const d = await load("exposArea", extra);
+    if (!d.items.length) { box.innerHTML = empty("전유공용면적 정보가 없습니다."); return; }
+    const exc = d.items.filter((x) => x.exposPubuseGbCd === "1");
+    const pub = d.items.filter((x) => x.exposPubuseGbCd !== "1");
+    const total = (arr) => arr.reduce((s, x) => s + (Number(x.area) || 0), 0);
+    box.innerHTML = `<div class="card">
+      <div class="bld-head">${esc(dongNm)} ${esc(hoNm)}</div>
+      <div class="grid" style="margin-bottom:12px">
+        ${kv("전용면적", num(total(exc), "㎡"))}
+        ${kv("공용면적", num(total(pub), "㎡"))}
+        ${kv("공급면적(합계)", num(total(d.items), "㎡"))}
+      </div>
+      <div class="table-wrap"><table>
+        <tr><th>구분</th><th>층</th><th>용도</th><th>구조</th><th>면적(㎡)</th></tr>
+        ${d.items.map((x) => `<tr><td>${txt(x.exposPubuseGbCdNm)}</td><td>${txt(x.flrNoNm)}</td>
+          <td>${txt(x.etcPurps) !== "-" ? txt(x.etcPurps) : txt(x.mainPurpsCdNm)}</td>
+          <td>${txt(x.strctCdNm)}</td><td>${num(x.area)}</td></tr>`).join("")}
+      </table></div></div>`;
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (err) {
+    box.innerHTML = `<div class="card err">${esc(err.message)}</div>`;
+  }
+}
+</script>
+</body>
+</html>

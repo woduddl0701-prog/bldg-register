@@ -1,0 +1,13 @@
+{
+  "name": "bldg-register",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "국토교통부 건축HUB 건축물대장 바로보기",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
