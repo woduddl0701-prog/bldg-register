@@ -57,9 +57,12 @@
 <body>
 <div class="wrap">
   <h1>건축물대장 바로보기</h1>
-  <div class="sub">도로명 또는 지번 주소로 건물을 찾으세요. (예: 세종대로 110, 역삼동 737)</div>
+  <div class="sub">
+    <strong style="color:var(--danger)">⚠️ 반드시 도로명 주소로 검색하세요.</strong><br>
+    지번 주소로 검색하면 결과가 나오지 않을 수 있습니다. (예: 세종대로 110)
+  </div>
 
-  <button id="openPostcode" style="width:100%">🔍 주소 검색</button>
+  <button id="openPostcode" style="width:100%">🔍 도로명 주소 검색</button>
   <div id="postcodeWrap" class="card" style="display:none;padding:0;height:470px;overflow:hidden"></div>
 
   <div id="addrBox"></div>
