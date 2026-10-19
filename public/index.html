@@ -159,6 +159,8 @@ function openBuilding(a) {
   $("#addrBox").innerHTML = `<div class="card">
     <div style="font-weight:600">${esc(a.roadAddr)}</div>
     <div class="muted" style="margin-top:2px">[지번] ${esc(a.jibunAddr)}</div>
+    <div class="muted" style="margin-top:6px;font-size:12px">조회코드: 시군구 ${esc(a.sigunguCd)} · 법정동 ${esc(a.bjdongCd)} · ${a.platGbCd === "1" ? "산" : "대지"} · 번 ${esc(a.bun)} · 지 ${esc(a.ji)}
+      · <a href="/api/building?${new URLSearchParams({ op: "title", sigunguCd: a.sigunguCd, bjdongCd: a.bjdongCd, platGbCd: a.platGbCd, bun: a.bun, ji: a.ji })}" target="_blank" style="color:var(--accent)">원본 응답 보기</a></div>
     <div style="margin-top:10px"><button class="ghost" id="backBtn">← 다른 주소 선택</button></div>
   </div>`;
   $("#backBtn").addEventListener("click", searchAddress);
