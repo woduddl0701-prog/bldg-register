@@ -26,7 +26,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "지번 코드 형식이 올바르지 않습니다." });
   }
 
-  const rawKey = process.env.DATA_GO_KR_KEY;
+  const rawKey = (process.env.DATA_GO_KR_KEY || "").replace(/\s+/g, ""); // 복사 시 섞인 공백·줄바꿈 제거
   if (!rawKey) return res.status(500).json({ error: "서버에 DATA_GO_KR_KEY가 설정되지 않았습니다." });
   // 공공데이터포털 '인코딩 키'를 넣었든 '디코딩 키'를 넣었든 동작하도록 처리
   const serviceKey = rawKey.includes("%") ? rawKey : encodeURIComponent(rawKey);
@@ -42,6 +42,19 @@ export default async function handler(req, res) {
       signal: AbortSignal.timeout(9000), // 응답이 없으면 9초 후 중단
     });
     const text = await r.text();
+
+    // 진단 모드: ...&debug=1 을 붙이면 공공데이터포털 원본 응답을 그대로 보여줌 (키 값은 노출 안 함)
+    if (req.query.debug === "1") {
+      const envKey = process.env.DATA_GO_KR_KEY || "";
+      return res.status(200).json({
+        region: process.env.VERCEL_REGION || "unknown",
+        keyLength: rawKey.length,
+        keyHadWhitespace: envKey !== envKey.replace(/\s+/g, ""),
+        keyHead: rawKey.slice(0, 4),
+        upstreamStatus: r.status,
+        upstreamRaw: text.slice(0, 1500),
+      });
+    }
 
     let data;
     try {
@@ -64,7 +77,9 @@ export default async function handler(req, res) {
     if (!Array.isArray(items)) items = [items];
 
     // 건축물대장은 자주 바뀌지 않으므로 CDN 캐시로 호출 횟수(일일 트래픽) 절약
-    res.setHeader("Cache-Control", "s-maxage=86400, stale-while-revalidate=604800");
+    res.setHeader("Cache-Control", items.length
+      ? "s-maxage=86400, stale-while-revalidate=604800"
+      : "no-store"); // 빈 결과는 캐시하지 않음
     return res.status(200).json({
       totalCount: Number(body.totalCount || 0),
       pageNo: Number(pageNo),
