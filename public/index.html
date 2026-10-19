@@ -102,10 +102,30 @@ async function api(path, params) {
 
 // ---------- 주소 검색 (카카오/다음 우편번호 서비스, 키 불필요) ----------
 // 선택한 주소의 법정동코드(bcode) + 지번주소의 번·지 → 건축물대장 조회 키로 변환
+// 지번주소에서 번·지 추출. "대치동 316 은마아파트"처럼 뒤에 건물명이 붙어도,
+// "태평로1가"처럼 동 이름에 숫자가 있어도 동작하도록 '단어 단위'로 첫 번지를 찾음
+function parseJibun(addr) {
+  const tokens = String(addr || "").trim().split(/\s+/);
+  for (let i = 0; i < tokens.length; i++) {
+    const m = tokens[i].match(/^(산)?(\d+)(?:-(\d+))?(?:번지)?$/);
+    if (!m) continue;
+    const mountain = !!m[1] || tokens[i - 1] === "산";
+    return { mountain, bun: m[2], ji: m[3] || "0" };
+  }
+  return null;
+}
+
 function toBuildingKey(d) {
-  const jibun = d.jibunAddress || d.autoJibunAddress || "";
-  const m = jibun.match(/(산\s*)?(\d+)(?:-(\d+))?\s*$/);
-  if (!d.bcode || !m) return null;
+  // 사용자가 지번(J)을 골랐으면 jibunAddress, 도로명(R)을 골랐으면 자동 매핑된 지번 우선
+  const candidates = d.userSelectedType === "J"
+    ? [d.jibunAddress, d.autoJibunAddress]
+    : [d.autoJibunAddress, d.jibunAddress];
+  let jibun = "", p = null;
+  for (const c of candidates) {
+    p = parseJibun(c);
+    if (p) { jibun = c; break; }
+  }
+  if (!d.bcode || !p) return null;
   return {
     roadAddr: d.roadAddress || d.autoRoadAddress || jibun,
     jibunAddr: jibun,
@@ -113,9 +133,9 @@ function toBuildingKey(d) {
     isApt: d.apartment === "Y",
     sigunguCd: d.bcode.slice(0, 5),
     bjdongCd: d.bcode.slice(5, 10),
-    platGbCd: m[1] ? "1" : "0",
-    bun: m[2].padStart(4, "0"),
-    ji: (m[3] || "0").padStart(4, "0"),
+    platGbCd: p.mountain ? "1" : "0",
+    bun: p.bun.padStart(4, "0"),
+    ji: p.ji.padStart(4, "0"),
   };
 }
 
